@@ -2,14 +2,12 @@ import os
 import re
 import json
 import sys
-import subprocess
-import requests
 import shutil
-from urllib.parse import urlparse, parse_qs
 import argparse
-import warnings
+import subprocess
+from urllib.parse import urlparse, parse_qs
 
-warnings.filterwarnings("ignore")
+import requests
 
 
 def require_env(name):
@@ -37,10 +35,10 @@ TOP_HEIGHT = int(require_env("TOP_HEIGHT"))
 BOTTOM_HEIGHT = int(require_env("BOTTOM_HEIGHT"))
 
 USE_SUBTITLE = env_bool("USE_SUBTITLE", False)
-WHISPER_MODEL = require_env("WHISPER_MODEL")
-SUBTITLE_FONT = require_env("SUBTITLE_FONT")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
+SUBTITLE_FONT = os.getenv("SUBTITLE_FONT", "Arial")
 SUBTITLE_FONTS_DIR = os.getenv("SUBTITLE_FONTS_DIR") or None
-SUBTITLE_LOCATION = require_env("SUBTITLE_LOCATION")
+SUBTITLE_LOCATION = os.getenv("SUBTITLE_LOCATION", "bottom")
 
 OUTPUT_RATIO = require_env("OUTPUT_RATIO")
 OUT_WIDTH = 720
@@ -71,57 +69,17 @@ def ffmpeg_tersedia():
     return bool(shutil.which("ffmpeg"))
 
 
-def coba_masukkan_ffmpeg_ke_path():
-    if ffmpeg_tersedia():
-        return True
-
-    local_app_data = os.environ.get("LOCALAPPDATA")
-    if not local_app_data:
-        return False
-
-    winget_packages = os.path.join(local_app_data, "Microsoft", "WinGet", "Packages")
-    gyan_root = os.path.join(winget_packages, "Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe")
-    if not os.path.isdir(gyan_root):
-        return False
-
-    found_bin_dir = None
-    for root, dirs, files in os.walk(gyan_root):
-        if "ffmpeg.exe" in files and os.path.basename(root).lower() == "bin":
-            found_bin_dir = root
-            break
-
-    if not found_bin_dir:
-        return False
-
-    os.environ["PATH"] = f"{found_bin_dir};{os.environ.get('PATH', '')}"
-    return ffmpeg_tersedia()
-
-
 def parse_args():
     parser = argparse.ArgumentParser(prog="yt-heatmap-clipper")
     parser.add_argument("--url", help="YouTube URL (watch/shorts/youtu.be)")
-    parser.add_argument(
-        "--crop",
-        choices=["default", "split_left", "split_right"],
-        help="Crop mode",
-    )
-    parser.add_argument(
-        "--subtitle",
-        choices=["y", "n"],
-        help="Enable auto subtitle (y/n)",
-    )
+    parser.add_argument("--crop", choices=["default", "split_left", "split_right"], help="Crop mode")
+    parser.add_argument("--subtitle", choices=["y", "n"], help="Enable auto subtitle (y/n)")
     parser.add_argument("--whisper-model", dest="whisper_model", help="Faster-Whisper model")
     parser.add_argument("--subtitle-font", dest="subtitle_font", help="Subtitle font name")
     parser.add_argument("--subtitle-fontsdir", dest="subtitle_fontsdir", help="Folder containing .ttf/.otf fonts")
-    parser.add_argument(
-        "--subtitle-location",
-        dest="subtitle_location",
-        choices=["center", "bottom"],
-        help="Subtitle placement",
-    )
+    parser.add_argument("--subtitle-location", dest="subtitle_location", choices=["center", "bottom"])
     parser.add_argument("--ratio", choices=["9:16", "1:1", "16:9", "original"], help="Output ratio preset")
     parser.add_argument("--check", action="store_true", help="Check dependencies then exit")
-    parser.add_argument("--no-update-ytdlp", action="store_true", help="Skip auto-update yt-dlp")
     return parser.parse_args()
 
 
@@ -162,7 +120,6 @@ def build_cover_scale_vf(out_w, out_h):
 def get_split_heights(out_h):
     if not out_h:
         return None, None
-
     bottom = min(BOTTOM_HEIGHT, max(1, out_h - 1))
     top = max(1, out_h - bottom)
     return top, bottom
@@ -198,43 +155,35 @@ def get_model_size(model):
     return sizes.get(model, "unknown size")
 
 
-def get_yt_dlp_cookie_args():
+def get_ytdlp_common_args():
+    args = [
+        "--extractor-args",
+        "youtube:player_client=mweb",
+    ]
+
     cookie_file = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
     if cookie_file and os.path.isfile(cookie_file):
-        return ["--cookies", cookie_file]
-    return []
+        args += ["--cookies", cookie_file]
+
+    return args
 
 
 def cek_dependensi(install_whisper=False, fatal=True):
-    args = getattr(cek_dependensi, "_args", None)
-    skip_update = bool(getattr(args, "no_update_ytdlp", False)) if args else False
-
-    if not skip_update:
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+    if not ffmpeg_tersedia():
+        print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
+        if fatal:
+            sys.exit(1)
+        return False
 
     if install_whisper:
         try:
             import faster_whisper  # noqa: F401
             print("✅ Faster-Whisper package installed.")
         except ImportError:
-            print("📦 Installing Faster-Whisper package...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "faster-whisper"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            print("✅ Faster-Whisper package installed successfully.")
-
-    coba_masukkan_ffmpeg_ke_path()
-    if not ffmpeg_tersedia():
-        print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
-        if fatal:
-            sys.exit(1)
-        return False
+            print("faster-whisper belum terinstall. Subtitle tidak bisa dipakai di image ini.")
+            if fatal:
+                sys.exit(1)
+            return False
 
     return True
 
@@ -298,7 +247,7 @@ def get_duration(video_id):
         sys.executable,
         "-m",
         "yt_dlp",
-        *get_yt_dlp_cookie_args(),
+        *get_ytdlp_common_args(),
         "--get-duration",
         f"https://youtu.be/{video_id}",
     ]
@@ -373,7 +322,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         sys.executable,
         "-m",
         "yt_dlp",
-        *get_yt_dlp_cookie_args(),
+        *get_ytdlp_common_args(),
         "--force-ipv4",
         "--quiet",
         "--no-warnings",
@@ -394,7 +343,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
         sys.executable,
         "-m",
         "yt_dlp",
-        *get_yt_dlp_cookie_args(),
+        *get_ytdlp_common_args(),
         "--force-ipv4",
         "--quiet",
         "--no-warnings",
@@ -458,8 +407,70 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-c:a", "aac", "-b:a", "128k",
                     cropped_file,
                 ]
+
+        elif crop_mode == "split_left":
+            if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
+                vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
+                cmd_crop = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", temp_file,
+                    *([] if not vf else ["-vf", vf]),
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                    "-c:a", "aac", "-b:a", "128k",
+                    cropped_file,
+                ]
+            else:
+                top_h, bottom_h = get_split_heights(out_h)
+                scaled = build_cover_scale_vf(out_w, out_h)
+                vf = (
+                    f"{scaled}[scaled];"
+                    f"[scaled]split=2[s1][s2];"
+                    f"[s1]crop={out_w}:{top_h}:(iw-{out_w})/2:(ih-{out_h})/2[top];"
+                    f"[s2]crop={out_w}:{bottom_h}:0:ih-{bottom_h}[bottom];"
+                    f"[top][bottom]vstack[out]"
+                )
+                cmd_crop = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", temp_file,
+                    "-filter_complex", vf,
+                    "-map", "[out]", "-map", "0:a?",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                    "-c:a", "aac", "-b:a", "128k",
+                    cropped_file,
+                ]
+
+        elif crop_mode == "split_right":
+            if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
+                vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
+                cmd_crop = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", temp_file,
+                    *([] if not vf else ["-vf", vf]),
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                    "-c:a", "aac", "-b:a", "128k",
+                    cropped_file,
+                ]
+            else:
+                top_h, bottom_h = get_split_heights(out_h)
+                scaled = build_cover_scale_vf(out_w, out_h)
+                vf = (
+                    f"{scaled}[scaled];"
+                    f"[scaled]split=2[s1][s2];"
+                    f"[s1]crop={out_w}:{top_h}:(iw-{out_w})/2:(ih-{out_h})/2[top];"
+                    f"[s2]crop={out_w}:{bottom_h}:iw-{out_w}:ih-{bottom_h}[bottom];"
+                    f"[top][bottom]vstack[out]"
+                )
+                cmd_crop = [
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", temp_file,
+                    "-filter_complex", vf,
+                    "-map", "[out]", "-map", "0:a?",
+                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+                    "-c:a", "aac", "-b:a", "128k",
+                    cropped_file,
+                ]
         else:
-            print(f"Crop mode {crop_mode} belum saya sederhanakan di file ini. Pakai default dulu.")
+            print(f"Unknown crop mode: {crop_mode}")
             return False
 
         print("  Cropping video...")
@@ -542,7 +553,6 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
 
 def main():
     args = parse_args()
-    cek_dependensi._args = args
 
     global WHISPER_MODEL, SUBTITLE_FONT, SUBTITLE_FONTS_DIR, SUBTITLE_LOCATION
 
@@ -562,11 +572,6 @@ def main():
         print("✅ Basic dependencies OK.")
         return
 
-    coba_masukkan_ffmpeg_ke_path()
-    if not ffmpeg_tersedia():
-        print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
-        sys.exit(1)
-
     crop_mode = args.crop or "default"
     crop_desc = {
         "default": "Default center crop",
@@ -582,8 +587,7 @@ def main():
     print(f"MAX_DURATION = {MAX_DURATION}")
     print(f"MIN_SCORE = {MIN_SCORE}")
     print(f"OUTPUT_RATIO = {OUTPUT_RATIO}")
-    print(f"Using cookie file: {os.getenv('YOUTUBE_COOKIES_FILE', '(none)')}")
-    print(f"Cookie file exists: {os.path.isfile(os.getenv('YOUTUBE_COOKIES_FILE', ''))}")
+    print(f"Using optional cookie file: {'yes' if os.getenv('YOUTUBE_COOKIES_FILE') else 'no'}")
 
     cek_dependensi(install_whisper=use_subtitle)
 
@@ -592,13 +596,11 @@ def main():
         sys.exit(1)
 
     video_id = extract_video_id(link)
-
     if not video_id:
         print("Invalid YouTube link.")
         sys.exit(1)
 
     heatmap_data = ambil_most_replayed(video_id)
-
     if not heatmap_data:
         print("No high-engagement segments found.")
         sys.exit(2)
