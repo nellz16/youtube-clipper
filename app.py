@@ -101,15 +101,17 @@ def copy_to_admin(from_chat_id: str, message_id: int):
     )
 
 
-def get_cookies_file():
-    path = (YOUTUBE_COOKIES_FILE or "").strip()
-    if not path:
+def prepare_writable_cookies_file(work_dir: str):
+    source_path = (YOUTUBE_COOKIES_FILE or "").strip()
+    if not source_path:
         return None
 
-    if os.path.isfile(path):
-        return path
+    if not os.path.isfile(source_path):
+        return None
 
-    return None
+    target_path = os.path.join(work_dir, "youtube.cookies.txt")
+    shutil.copyfile(source_path, target_path)
+    return target_path
 
 
 def upload_clip_to_channel(file_path: str, caption: str):
@@ -199,7 +201,7 @@ def run_clipper_job(url: str, requester_chat_id: str):
         env.setdefault("SUBTITLE_FONT", "Arial")
         env.setdefault("SUBTITLE_LOCATION", "bottom")
 
-        cookies_path = get_cookies_file()
+        cookies_path = prepare_writable_cookies_file(work_dir)
         if cookies_path:
             env["YOUTUBE_COOKIES_FILE"] = cookies_path
 
@@ -334,7 +336,8 @@ def health():
             "busy": RUN_LOCK.locked(),
             "admin_set": bool(ADMIN_CHAT_ID),
             "channel_set": bool(CHANNEL_CHAT_ID),
-            "cookies_file": get_cookies_file() or "(none)",
+            "cookies_source_file": YOUTUBE_COOKIES_FILE,
+            "cookies_source_exists": os.path.isfile(YOUTUBE_COOKIES_FILE),
             "time": int(time.time()),
         }
     )
@@ -388,7 +391,8 @@ def telegram_webhook():
             f"Chat ID kamu: {chat_id}\n"
             f"ADMIN_CHAT_ID set: {'yes' if ADMIN_CHAT_ID else 'no'}\n"
             f"CHANNEL_CHAT_ID set: {'yes' if CHANNEL_CHAT_ID else 'no'}\n"
-            f"Cookies file: {get_cookies_file() or '(none)'}\n"
+            f"Cookies source: {YOUTUBE_COOKIES_FILE}\n"
+            f"Cookies source exists: {'yes' if os.path.isfile(YOUTUBE_COOKIES_FILE) else 'no'}\n"
             f"Mode: crop={CLIP_CROP}, ratio={CLIP_RATIO}, subtitle={CLIP_SUBTITLE}"
         )
         send_text(chat_id, summary)
