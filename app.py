@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import sys
@@ -24,7 +25,8 @@ CLIP_RATIO = os.getenv("CLIP_RATIO", "9:16")
 CLIP_SUBTITLE = os.getenv("CLIP_SUBTITLE", "n").lower()  # y / n
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
 
-MAX_TG_FILE_BYTES = 50 * 1024 * 1024
+MAX_TG_FILE_BYTES = int(os.getenv("MAX_TG_FILE_BYTES", str(50 * 1024 * 1024)))
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_ROOT = os.path.join(tempfile.gettempdir(), "ytclip_jobs")
 
@@ -45,9 +47,11 @@ def remember_update(update_id: int) -> bool:
     with RECENT_LOCK:
         if update_id in RECENT_SET:
             return False
+
         if len(RECENT_UPDATES) == RECENT_UPDATES.maxlen:
             oldest = RECENT_UPDATES.popleft()
             RECENT_SET.discard(oldest)
+
         RECENT_UPDATES.append(update_id)
         RECENT_SET.add(update_id)
         return True
@@ -56,6 +60,7 @@ def remember_update(update_id: int) -> bool:
 def tg_api(method: str, data=None, files=None, timeout=120):
     url = f"{TG_BASE}/{method}"
     resp = requests.post(url, data=data, files=files, timeout=timeout)
+
     try:
         payload = resp.json()
     except Exception:
@@ -82,6 +87,7 @@ def send_text(chat_id: str, text: str):
 def copy_to_admin(from_chat_id: str, message_id: int):
     if not ADMIN_CHAT_ID:
         return None
+
     return tg_api(
         "copyMessage",
         data={
@@ -91,6 +97,22 @@ def copy_to_admin(from_chat_id: str, message_id: int):
         },
         timeout=120,
     )
+
+
+def ensure_youtube_cookies_file():
+    cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64", "").strip()
+    if not cookies_b64:
+        return None
+
+    cookies_path = "/tmp/youtube.cookies.txt"
+
+    try:
+        raw = base64.b64decode(cookies_b64)
+        with open(cookies_path, "wb") as f:
+            f.write(raw)
+        return cookies_path
+    except Exception as e:
+        raise RuntimeError(f"Gagal decode YOUTUBE_COOKIES_B64: {e}")
 
 
 def upload_clip_to_channel(file_path: str, caption: str):
@@ -120,9 +142,10 @@ def upload_clip_to_channel(file_path: str, caption: str):
         )
 
 
-def extract_youtube_url(text: str) -> str | None:
+def extract_youtube_url(text: str):
     if not text:
         return None
+
     match = YT_URL_RE.search(text)
     return match.group(1) if match else None
 
@@ -130,19 +153,25 @@ def extract_youtube_url(text: str) -> str | None:
 def list_mp4_files(folder: str):
     if not os.path.isdir(folder):
         return []
+
     files = []
     for name in os.listdir(folder):
         path = os.path.join(folder, name)
         if os.path.isfile(path) and name.lower().endswith(".mp4"):
             files.append(path)
+
     files.sort()
     return files
 
 
 def run_clipper_job(url: str, requester_chat_id: str):
-    if not RUN_LOCK.acquire(blocking=False):
+    acquired = RUN_LOCK.acquire(blocking=False)
+    if not acquired:
         if requester_chat_id:
-            send_text(requester_chat_id, "Masih ada job lain yang jalan. Tunggu yang sekarang selesai dulu.")
+            send_text(
+                requester_chat_id,
+                "Masih ada job lain yang sedang jalan. Tunggu yang sekarang selesai dulu.",
+            )
         return
 
     job_id = uuid.uuid4().hex[:8]
@@ -163,10 +192,19 @@ def run_clipper_job(url: str, requester_chat_id: str):
         env.setdefault("MAX_CLIPS", "3")
         env.setdefault("MAX_DURATION", "45")
         env.setdefault("MIN_SCORE", "0.45")
+        env.setdefault("MAX_WORKERS", "1")
         env.setdefault("PADDING", "8")
+        env.setdefault("TOP_HEIGHT", "960")
+        env.setdefault("BOTTOM_HEIGHT", "320")
         env.setdefault("USE_SUBTITLE", "1" if CLIP_SUBTITLE == "y" else "0")
         env.setdefault("OUTPUT_RATIO", CLIP_RATIO)
         env.setdefault("WHISPER_MODEL", WHISPER_MODEL)
+        env.setdefault("SUBTITLE_FONT", "Arial")
+        env.setdefault("SUBTITLE_LOCATION", "bottom")
+
+        cookies_path = ensure_youtube_cookies_file()
+        if cookies_path:
+            env["YOUTUBE_COOKIES_FILE"] = cookies_path
 
         cmd = [
             sys.executable,
@@ -185,6 +223,10 @@ def run_clipper_job(url: str, requester_chat_id: str):
         if CLIP_SUBTITLE == "y":
             cmd += ["--whisper-model", WHISPER_MODEL]
 
+        print(f"[JOB {job_id}] Running command: {' '.join(cmd)}")
+        print(f"[JOB {job_id}] OUTPUT_DIR={out_dir}")
+        print(f"[JOB {job_id}] Using cookies file: {env.get('YOUTUBE_COOKIES_FILE', '(none)')}")
+
         proc = subprocess.run(
             cmd,
             cwd=APP_DIR,
@@ -196,7 +238,12 @@ def run_clipper_job(url: str, requester_chat_id: str):
 
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
-        
+
+        if stdout:
+            print(f"[JOB {job_id}] STDOUT:\n{stdout}")
+        if stderr:
+            print(f"[JOB {job_id}] STDERR:\n{stderr}")
+
         debug_output = "\n".join([
             "STDOUT:",
             stdout[-2500:] if stdout else "(empty)",
@@ -204,7 +251,7 @@ def run_clipper_job(url: str, requester_chat_id: str):
             "STDERR:",
             stderr[-1500:] if stderr else "(empty)",
         ]).strip()
-        
+
         if proc.returncode != 0:
             err_text = stderr or stdout or "Unknown error"
             send_text(
@@ -212,16 +259,16 @@ def run_clipper_job(url: str, requester_chat_id: str):
                 f"Gagal membuat clip.\nID: {job_id}\nReturn code: {proc.returncode}\n\n{err_text[:3000]}",
             )
             return
-            
-            clips = list_mp4_files(out_dir)
-            if not clips:
-                send_text(
-                    requester_chat_id,
-                    f"Job selesai tapi tidak ada file MP4 yang ditemukan.\n"
-                    f"ID: {job_id}\n\n"
-                    f"{debug_output[:3000]}",
-                )
-                return
+
+        clips = list_mp4_files(out_dir)
+        if not clips:
+            send_text(
+                requester_chat_id,
+                f"Job selesai tapi tidak ada file MP4 yang ditemukan.\n"
+                f"ID: {job_id}\n\n"
+                f"{debug_output[:3000]}",
+            )
+            return
 
         uploaded_count = 0
 
@@ -265,13 +312,21 @@ def run_clipper_job(url: str, requester_chat_id: str):
     except subprocess.TimeoutExpired:
         send_text(requester_chat_id, f"Job timeout.\nID: {job_id}")
     except Exception as e:
+        print(f"[JOB {job_id}] ERROR: {e}")
         send_text(requester_chat_id, f"Job error.\nID: {job_id}\nError: {str(e)[:3500]}")
     finally:
         try:
             shutil.rmtree(work_dir, ignore_errors=True)
         except Exception:
             pass
-        RUN_LOCK.release()
+
+        if acquired and RUN_LOCK.locked():
+            RUN_LOCK.release()
+
+
+@app.get("/")
+def root():
+    return jsonify({"ok": True, "service": "ytclip-bot"})
 
 
 @app.get("/health")
@@ -301,7 +356,6 @@ def telegram_webhook():
         if not remember_update(update_id):
             return jsonify({"ok": True, "duplicate": True})
 
-    # Detect channel id from channel post
     if "channel_post" in update:
         channel_post = update["channel_post"]
         chat = channel_post.get("chat", {})
