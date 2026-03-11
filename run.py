@@ -8,7 +8,9 @@ import shutil
 from urllib.parse import urlparse, parse_qs
 import argparse
 import warnings
+
 warnings.filterwarnings("ignore")
+
 
 def require_env(name):
     value = os.getenv(name)
@@ -16,11 +18,13 @@ def require_env(name):
         raise RuntimeError(f"Environment variable '{name}' wajib diisi")
     return value
 
+
 def env_bool(name, default=False):
     value = os.getenv(name)
     if value is None:
         return default
     return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
 
 OUTPUT_DIR = require_env("OUTPUT_DIR")
 MAX_DURATION = int(require_env("MAX_DURATION"))
@@ -42,9 +46,11 @@ OUTPUT_RATIO = require_env("OUTPUT_RATIO")
 OUT_WIDTH = 720
 OUT_HEIGHT = 1280
 
+
 def set_ratio_preset(preset):
     global OUTPUT_RATIO, OUT_WIDTH, OUT_HEIGHT
     OUTPUT_RATIO = preset
+
     if preset == "9:16":
         OUT_WIDTH, OUT_HEIGHT = 720, 1280
         return
@@ -57,7 +63,9 @@ def set_ratio_preset(preset):
     if preset == "original":
         OUT_WIDTH, OUT_HEIGHT = None, None
         return
+
     raise ValueError("Invalid ratio preset")
+
 
 def ffmpeg_tersedia():
     return bool(shutil.which("ffmpeg"))
@@ -126,6 +134,7 @@ def escape_subtitles_filter_dir(path):
     abs_path = os.path.abspath(path)
     return abs_path.replace("\\", "/").replace(":", "\\:")
 
+
 def build_subtitle_force_style():
     alignment = "2" if SUBTITLE_LOCATION == "bottom" else "5"
     margin_v = "40" if SUBTITLE_LOCATION == "bottom" else "0"
@@ -153,14 +162,13 @@ def build_cover_scale_vf(out_w, out_h):
 def get_split_heights(out_h):
     if not out_h:
         return None, None
+
     bottom = min(BOTTOM_HEIGHT, max(1, out_h - 1))
     top = max(1, out_h - bottom)
     return top, bottom
+
+
 def extract_video_id(url):
-    """
-    Extract the YouTube video ID from a given URL.
-    Supports standard YouTube URLs, shortened URLs, and Shorts URLs.
-    """
     parsed = urlparse(url)
 
     if parsed.hostname in ("youtu.be", "www.youtu.be"):
@@ -170,15 +178,14 @@ def extract_video_id(url):
         if parsed.path == "/watch":
             return parse_qs(parsed.query).get("v", [None])[0]
         if parsed.path.startswith("/shorts/"):
-            return parsed.path.split("/")[2]
+            parts = parsed.path.split("/")
+            if len(parts) >= 3:
+                return parts[2]
 
     return None
 
 
 def get_model_size(model):
-    """
-    Get the approximate size of a Whisper model.
-    """
     sizes = {
         "tiny": "75 MB",
         "base": "142 MB",
@@ -186,16 +193,19 @@ def get_model_size(model):
         "medium": "1.5 GB",
         "large-v1": "2.9 GB",
         "large-v2": "2.9 GB",
-        "large-v3": "2.9 GB"
+        "large-v3": "2.9 GB",
     }
     return sizes.get(model, "unknown size")
 
 
+def get_yt_dlp_cookie_args():
+    cookie_file = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
+    if cookie_file:
+        return ["--cookies", cookie_file]
+    return []
+
+
 def cek_dependensi(install_whisper=False, fatal=True):
-    """
-    Ensure required dependencies are available.
-    Automatically updates yt-dlp and checks FFmpeg availability.
-    """
     global WHISPER_MODEL
     args = getattr(cek_dependensi, "_args", None)
     skip_update = bool(getattr(args, "no_update_ytdlp", False)) if args else False
@@ -204,19 +214,17 @@ def cek_dependensi(install_whisper=False, fatal=True):
         subprocess.run(
             [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
     if install_whisper:
-        # Check if faster-whisper package is installed
         try:
-            import faster_whisper
-            print(f"✅ Faster-Whisper package installed.")
-            
-            # Check if selected model is cached
+            import faster_whisper  # noqa: F401
+            print("✅ Faster-Whisper package installed.")
+
             cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
             model_name = f"faster-whisper-{WHISPER_MODEL}"
-            
+
             model_cached = False
             if os.path.exists(cache_dir):
                 try:
@@ -224,22 +232,22 @@ def cek_dependensi(install_whisper=False, fatal=True):
                     model_cached = any(model_name in item.lower() for item in cached_items)
                 except Exception:
                     pass
-            
+
             if model_cached:
                 print(f"✅ Model '{WHISPER_MODEL}' already cached and ready.\n")
             else:
                 print(f"⚠️  Model '{WHISPER_MODEL}' not found in cache.")
                 print(f"   📥 Will auto-download ~{get_model_size(WHISPER_MODEL)} on first transcribe.")
-                print(f"   ⏱️  Download happens only once, then cached for future use.\n")
-                
+                print("   ⏱️  Download happens only once, then cached for future use.\n")
+
         except ImportError:
             print("📦 Installing Faster-Whisper package...")
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "faster-whisper"],
                 stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             )
-            print(f"✅ Faster-Whisper package installed successfully.")
+            print("✅ Faster-Whisper package installed successfully.")
             print(f"⚠️  Model '{WHISPER_MODEL}' (~{get_model_size(WHISPER_MODEL)}) will be downloaded on first use.\n")
 
     coba_masukkan_ffmpeg_ke_path()
@@ -248,14 +256,11 @@ def cek_dependensi(install_whisper=False, fatal=True):
         if fatal:
             sys.exit(1)
         return False
+
     return True
 
 
 def ambil_most_replayed(video_id):
-    """
-    Fetch and parse YouTube 'Most Replayed' heatmap data.
-    Returns a list of high-engagement segments.
-    """
     url = f"https://www.youtube.com/watch?v={video_id}"
     headers = {"User-Agent": "Mozilla/5.0"}
 
@@ -266,21 +271,24 @@ def ambil_most_replayed(video_id):
         print(f"Heatmap request status: {resp.status_code}")
         html = resp.text
         print(f"Heatmap HTML length: {len(html)}")
-    except Exception:
+    except Exception as e:
+        print(f"Heatmap request failed: {e}")
         return []
 
     match = re.search(
         r'"markers":\s*(\[.*?\])\s*,\s*"?markersMetadata"?',
         html,
-        re.DOTALL
+        re.DOTALL,
     )
 
     if not match:
+        print("Heatmap markers regex not found in HTML.")
         return []
 
     try:
         markers = json.loads(match.group(1).replace('\\"', '"'))
-    except Exception:
+    except Exception as e:
+        print(f"Failed parsing heatmap markers JSON: {e}")
         return []
 
     results = []
@@ -292,14 +300,13 @@ def ambil_most_replayed(video_id):
         try:
             score = float(marker.get("intensityScoreNormalized", 0))
             if score >= MIN_SCORE:
-                results.append({
-                    "start": float(marker["startMillis"]) / 1000,
-                    "duration": min(
-                        float(marker["durationMillis"]) / 1000,
-                        MAX_DURATION
-                    ),
-                    "score": score
-                })
+                results.append(
+                    {
+                        "start": float(marker["startMillis"]) / 1000,
+                        "duration": min(float(marker["durationMillis"]) / 1000, MAX_DURATION),
+                        "score": score,
+                    }
+                )
         except Exception:
             continue
 
@@ -308,15 +315,13 @@ def ambil_most_replayed(video_id):
 
 
 def get_duration(video_id):
-    """
-    Retrieve the total duration of a YouTube video in seconds.
-    """
     cmd = [
         sys.executable,
         "-m",
         "yt_dlp",
+        *get_yt_dlp_cookie_args(),
         "--get-duration",
-        f"https://youtu.be/{video_id}"
+        f"https://youtu.be/{video_id}",
     ]
 
     try:
@@ -325,12 +330,9 @@ def get_duration(video_id):
 
         if len(time_parts) == 2:
             return int(time_parts[0]) * 60 + int(time_parts[1])
+
         if len(time_parts) == 3:
-            return (
-                int(time_parts[0]) * 3600 +
-                int(time_parts[1]) * 60 +
-                int(time_parts[2])
-            )
+            return int(time_parts[0]) * 3600 + int(time_parts[1]) * 60 + int(time_parts[2])
     except Exception:
         pass
 
@@ -338,10 +340,6 @@ def get_duration(video_id):
 
 
 def generate_subtitle(video_file, subtitle_file, event_hook=None):
-    """
-    Generate subtitle file using Faster-Whisper for the given video.
-    Returns True if successful, False otherwise.
-    """
     from faster_whisper import WhisperModel
 
     def load_and_transcribe():
@@ -350,15 +348,17 @@ def generate_subtitle(video_file, subtitle_file, event_hook=None):
                 event_hook("stage", {"stage": "subtitle_model_load"})
             except Exception:
                 pass
+
         print(f"  Loading Faster-Whisper model '{WHISPER_MODEL}'...")
         print(f"  (If this is first time, downloading ~{get_model_size(WHISPER_MODEL)}...)")
         model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        print("  ✅ Model loaded. Transcribing audio (4-5x faster than standard Whisper)...")
+        print("  ✅ Model loaded. Transcribing audio...")
         if callable(event_hook):
             try:
                 event_hook("stage", {"stage": "subtitle_transcribe"})
             except Exception:
                 pass
+
         segments, info = model.transcribe(video_file, language="id")
         return segments
 
@@ -368,8 +368,7 @@ def generate_subtitle(video_file, subtitle_file, event_hook=None):
         msg = str(e)
         if os.name == "nt" and "WinError 1314" in msg:
             print(f"  Failed to generate subtitle: {msg}")
-            print("  Windows kamu kelihatan tidak mengizinkan symlink (HuggingFace cache).")
-            print("  Retrying sekali lagi (biasanya langsung beres setelah fallback cache aktif)...")
+            print("  Retrying once...")
             try:
                 segments = load_and_transcribe()
             except Exception as e2:
@@ -384,6 +383,7 @@ def generate_subtitle(video_file, subtitle_file, event_hook=None):
             event_hook("stage", {"stage": "subtitle_write"})
         except Exception:
             pass
+
     print("  Generating subtitle file...")
     with open(subtitle_file, "w", encoding="utf-8") as f:
         for i, segment in enumerate(segments, start=1):
@@ -399,9 +399,6 @@ def generate_subtitle(video_file, subtitle_file, event_hook=None):
 
 
 def format_timestamp(seconds):
-    """
-    Convert seconds to SRT timestamp format (HH:MM:SS,mmm)
-    """
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -410,14 +407,6 @@ def format_timestamp(seconds):
 
 
 def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default", use_subtitle=False, event_hook=None):
-    """
-    Download, crop, and export a single vertical clip
-    based on a heatmap segment.
-    
-    Args:
-        crop_mode: "default", "split_left", or "split_right"
-        use_subtitle: whether to generate and burn subtitle
-    """
     start_original = item["start"]
     end_original = item["start"] + item["duration"]
 
@@ -425,6 +414,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
     end = min(end_original + PADDING, total_duration)
 
     if end - start < 3:
+        print(f"[Clip {index}] Skipped because duration too short.")
         return False
 
     temp_file = f"temp_{index}.mkv"
@@ -432,10 +422,8 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
     subtitle_file = f"temp_{index}.srt"
     output_file = os.path.join(OUTPUT_DIR, f"clip_{index}.mp4")
 
-    print(
-        f"[Clip {index}] Processing segment "
-        f"({int(start)}s - {int(end)}s, padding {PADDING}s)"
-    )
+    print(f"[Clip {index}] Processing segment ({int(start)}s - {int(end)}s, padding {PADDING}s)")
+
     if callable(event_hook):
         try:
             event_hook("stage", {"stage": "download", "clip_index": index})
@@ -443,29 +431,45 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             pass
 
     cmd_download = [
-        sys.executable, "-m", "yt_dlp",
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        *get_yt_dlp_cookie_args(),
         "--force-ipv4",
-        "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
+        "--quiet",
+        "--no-warnings",
+        "--downloader",
+        "ffmpeg",
         "--downloader-args",
         f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
-        "--merge-output-format", "mkv",
+        "--merge-output-format",
+        "mkv",
         "-f",
         "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b",
-        "-o", temp_file,
-        f"https://youtu.be/{video_id}"
+        "-o",
+        temp_file,
+        f"https://youtu.be/{video_id}",
     ]
+
     cmd_download_fallback = [
-        sys.executable, "-m", "yt_dlp",
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        *get_yt_dlp_cookie_args(),
         "--force-ipv4",
-        "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
+        "--quiet",
+        "--no-warnings",
+        "--downloader",
+        "ffmpeg",
         "--downloader-args",
         f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
-        "--merge-output-format", "mkv",
-        "-f", "bv*+ba/b",
-        "-o", temp_file,
-        f"https://youtu.be/{video_id}"
+        "--merge-output-format",
+        "mkv",
+        "-f",
+        "bv*+ba/b",
+        "-o",
+        temp_file,
+        f"https://youtu.be/{video_id}",
     ]
 
     try:
@@ -475,7 +479,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
             )
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or "").strip()
@@ -485,7 +489,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
                 )
             else:
                 raise
@@ -495,6 +499,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             return False
 
         out_w, out_h = OUT_WIDTH, OUT_HEIGHT
+
         if crop_mode == "default":
             if OUTPUT_RATIO == "original":
                 cmd_crop = [
@@ -502,7 +507,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-i", temp_file,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
             else:
                 vf = build_cover_scale_crop_vf(out_w, out_h)
@@ -512,8 +517,9 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-vf", vf,
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
+
         elif crop_mode == "split_left":
             if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
@@ -523,7 +529,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
             else:
                 top_h, bottom_h = get_split_heights(out_h)
@@ -542,8 +548,9 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-map", "[out]", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
+
         elif crop_mode == "split_right":
             if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
                 vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
@@ -553,7 +560,7 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     *([] if not vf else ["-vf", vf]),
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
             else:
                 top_h, bottom_h = get_split_heights(out_h)
@@ -572,32 +579,37 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-map", "[out]", "-map", "0:a?",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "aac", "-b:a", "128k",
-                    cropped_file
+                    cropped_file,
                 ]
+        else:
+            print(f"Unknown crop mode: {crop_mode}")
+            return False
 
         if callable(event_hook):
             try:
                 event_hook("stage", {"stage": "crop", "clip_index": index})
             except Exception:
                 pass
+
         print("  Cropping video...")
-        result = subprocess.run(
+        subprocess.run(
             cmd_crop,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
 
-        os.remove(temp_file)
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
 
-        # Generate and burn subtitle if enabled
         if use_subtitle:
             if callable(event_hook):
                 try:
                     event_hook("stage", {"stage": "subtitle", "clip_index": index})
                 except Exception:
                     pass
+
             print("  Generating subtitle...")
             if generate_subtitle(cropped_file, subtitle_file, event_hook=event_hook):
                 if callable(event_hook):
@@ -605,14 +617,14 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                         event_hook("stage", {"stage": "burn_subtitle", "clip_index": index})
                     except Exception:
                         pass
+
                 print("  Burning subtitle to video...")
-                # Get absolute path for subtitle file
                 subtitle_path = escape_subtitles_filter_path(subtitle_file)
                 fonts_dir = SUBTITLE_FONTS_DIR
                 fontsdir_arg = ""
                 if fonts_dir and os.path.isdir(fonts_dir):
                     fontsdir_arg = f":fontsdir='{escape_subtitles_filter_dir(fonts_dir)}'"
-                
+
                 force_style = build_subtitle_force_style()
                 cmd_subtitle = [
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -620,21 +632,22 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-vf", f"subtitles='{subtitle_path}'{fontsdir_arg}:force_style='{force_style}'",
                     "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
                     "-c:a", "copy",
-                    output_file
+                    output_file,
                 ]
-                
-                result = subprocess.run(
+
+                subprocess.run(
                     cmd_subtitle,
                     check=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
                 )
-                
-                os.remove(cropped_file)
-                os.remove(subtitle_file)
+
+                if os.path.exists(cropped_file):
+                    os.remove(cropped_file)
+                if os.path.exists(subtitle_file):
+                    os.remove(subtitle_file)
             else:
-                # If subtitle generation failed, use cropped file as output
                 print("  Subtitle generation failed, continuing without subtitle...")
                 if callable(event_hook):
                     try:
@@ -643,12 +656,12 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                         pass
                 os.rename(cropped_file, output_file)
         else:
-            # No subtitle, rename cropped file to output
             if callable(event_hook):
                 try:
                     event_hook("stage", {"stage": "finalize", "clip_index": index})
                 except Exception:
                     pass
+
             os.rename(cropped_file, output_file)
 
         print("Clip successfully generated.")
@@ -657,10 +670,10 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 event_hook("stage", {"stage": "done_clip", "clip_index": index})
             except Exception:
                 pass
+
         return True
 
     except subprocess.CalledProcessError as e:
-        # Cleanup temp files
         for f in [temp_file, cropped_file, subtitle_file]:
             if os.path.exists(f):
                 try:
@@ -668,20 +681,24 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                 except Exception:
                     pass
 
-        print(f"Failed to generate this clip.")
+        print("Failed to generate this clip.")
         print(f"Error details: {e.stderr if e.stderr else e.stdout}")
         return False
 
-        
+    except Exception as e:
+        for f in [temp_file, cropped_file, subtitle_file]:
+            if os.path.exists(f):
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
 
-        print(f"Failed to generate this clip.")
+        print("Failed to generate this clip.")
         print(f"Error: {str(e)}")
         return False
 
+
 def main():
-    """
-    Main entry point of the application.
-    """
     args = parse_args()
     cek_dependensi._args = args
 
@@ -730,6 +747,7 @@ def main():
     print(f"MAX_DURATION = {MAX_DURATION}")
     print(f"MIN_SCORE = {MIN_SCORE}")
     print(f"OUTPUT_RATIO = {OUTPUT_RATIO}")
+    print(f"Using cookie file: {os.getenv('YOUTUBE_COOKIES_FILE', '(none)')}")
 
     if crop_mode is None or use_subtitle is None or not link:
         print("\n=== Crop Mode ===")
@@ -772,7 +790,6 @@ def main():
             print("❌ Subtitle disabled")
 
         print()
-
         cek_dependensi(install_whisper=use_subtitle)
 
         if not link:
@@ -797,32 +814,26 @@ def main():
     total_duration = get_duration(video_id)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    print(
-        f"Processing clips with {PADDING}s pre-padding "
-        f"and {PADDING}s post-padding."
-    )
+    print(f"Processing clips with {PADDING}s pre-padding and {PADDING}s post-padding.")
     print(f"Using crop mode: {crop_desc}")
 
     success_count = 0
 
-    for item in heatmap_data:
+    for idx, item in enumerate(heatmap_data, start=1):
         if success_count >= MAX_CLIPS:
             break
 
         if proses_satu_clip(
             video_id,
             item,
-            success_count + 1,
+            idx,
             total_duration,
             crop_mode,
-            use_subtitle
+            use_subtitle,
         ):
             success_count += 1
 
-    print(
-        f"Finished processing. "
-        f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
-    )
+    print(f"Finished processing. {success_count} clip(s) successfully saved to '{OUTPUT_DIR}'.")
 
     if os.path.isdir(OUTPUT_DIR):
         print("Files in OUTPUT_DIR:", os.listdir(OUTPUT_DIR))
@@ -831,6 +842,7 @@ def main():
 
     if success_count == 0:
         sys.exit(3)
+
 
 if __name__ == "__main__":
     main()
