@@ -10,20 +10,23 @@ import argparse
 import warnings
 warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = "clips"      # Directory where generated clips will be saved
-MAX_DURATION = 60         # Maximum duration (in seconds) for each clip
-MIN_SCORE = 0.40          # Minimum heatmap intensity score to be considered viral
-MAX_CLIPS = 10            # Maximum number of clips to generate per video
-MAX_WORKERS = 1           # Number of parallel workers (reserved for future concurrency)
-PADDING = 10              # Extra seconds added before and after each detected segment
-TOP_HEIGHT = 960          # Height for top section (center content) in split mode
-BOTTOM_HEIGHT = 320       # Height for bottom section (facecam) in split mode
-USE_SUBTITLE = True       # Enable auto subtitle using Faster-Whisper (4-5x faster)
-WHISPER_MODEL = "small"    # Whisper model size: tiny, base, small, medium, large
-SUBTITLE_FONT = "Arial"
-SUBTITLE_FONTS_DIR = None
-SUBTITLE_LOCATION = "bottom"
-OUTPUT_RATIO = "9:16"
+OUTPUT_DIR = os.getenv("OUTPUT_DIR")
+MAX_DURATION = int(os.getenv("MAX_DURATION"))
+MIN_SCORE = float(os.getenv("MIN_SCORE"))
+MAX_CLIPS = int(os.getenv("MAX_CLIPS"))
+MAX_WORKERS = int(os.getenv("MAX_WORKERS"))
+PADDING = int(os.getenv("PADDING"))
+
+TOP_HEIGHT = int(os.getenv("TOP_HEIGHT"))
+BOTTOM_HEIGHT = int(os.getenv("BOTTOM_HEIGHT"))
+
+USE_SUBTITLE = env_bool("USE_SUBTITLE")
+WHISPER_MODEL = os.getenv("WHISPER_MODEL")
+SUBTITLE_FONT = os.getenv("SUBTITLE_FONT")
+SUBTITLE_FONTS_DIR = os.getenv("SUBTITLE_FONTS_DIR") or None
+SUBTITLE_LOCATION = os.getenv("SUBTITLE_LOCATION")
+
+OUTPUT_RATIO = os.getenv("OUTPUT_RATIO")
 OUT_WIDTH = 720
 OUT_HEIGHT = 1280
 
