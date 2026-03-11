@@ -820,22 +820,159 @@ for item in heatmap_data:
         success_count + 1,
         total_duration,
         crop_mode,
-        use_subtitle
-    ):
-        success_count += 1
+        use_subtitledef main():
+    """
+    Main entry point of the application.
+    """
+    args = parse_args()
+    cek_dependensi._args = args
 
-print(
-    f"Finished processing. "
-    f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
-)
+    global WHISPER_MODEL, SUBTITLE_FONT, SUBTITLE_FONTS_DIR, SUBTITLE_LOCATION
 
-if os.path.isdir(OUTPUT_DIR):
-    print("Files in OUTPUT_DIR:", os.listdir(OUTPUT_DIR))
-else:
-    print("OUTPUT_DIR does not exist.")
+    if args.whisper_model:
+        WHISPER_MODEL = args.whisper_model
+    if args.subtitle_font:
+        SUBTITLE_FONT = args.subtitle_font
+    if args.subtitle_fontsdir:
+        SUBTITLE_FONTS_DIR = args.subtitle_fontsdir
+    if args.subtitle_location:
+        SUBTITLE_LOCATION = args.subtitle_location
+    if args.ratio:
+        set_ratio_preset(args.ratio)
 
-if success_count == 0:
-    sys.exit(3)
+    if args.check:
+        cek_dependensi(install_whisper=False)
+        print("✅ Basic dependencies OK.")
+        return
+
+    coba_masukkan_ffmpeg_ke_path()
+    if not ffmpeg_tersedia():
+        print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
+        sys.exit(1)
+
+    crop_mode = args.crop
+    crop_desc = None
+    if crop_mode:
+        crop_desc = {
+            "default": "Default center crop",
+            "split_left": "Split crop (bottom-left facecam)",
+            "split_right": "Split crop (bottom-right facecam)",
+        }[crop_mode]
+
+    subtitle_choice = args.subtitle
+    if subtitle_choice:
+        use_subtitle = subtitle_choice == "y"
+    else:
+        use_subtitle = None
+
+    link = args.url
+
+    print(f"OUTPUT_DIR = {OUTPUT_DIR}")
+    print(f"MAX_CLIPS = {MAX_CLIPS}")
+    print(f"MAX_DURATION = {MAX_DURATION}")
+    print(f"MIN_SCORE = {MIN_SCORE}")
+    print(f"OUTPUT_RATIO = {OUTPUT_RATIO}")
+
+    if crop_mode is None or use_subtitle is None or not link:
+        print("\n=== Crop Mode ===")
+        print("1. Default (center crop)")
+        print("2. Split 1 (top: center, bottom: bottom-left (facecam))")
+        print("3. Split 2 (top: center, bottom: bottom-right ((facecam))")
+
+        while crop_mode is None:
+            choice = input("\nSelect crop mode (1-3): ").strip()
+            if choice == "1":
+                crop_mode = "default"
+                crop_desc = "Default center crop"
+                break
+            if choice == "2":
+                crop_mode = "split_left"
+                crop_desc = "Split crop (bottom-left facecam)"
+                break
+            if choice == "3":
+                crop_mode = "split_right"
+                crop_desc = "Split crop (bottom-right facecam)"
+                break
+            print("Invalid choice. Please enter 1, 2, or 3.")
+
+        print(f"Selected: {crop_desc}")
+
+        print("\n=== Auto Subtitle ===")
+        print(f"Available model: {WHISPER_MODEL} (~{get_model_size(WHISPER_MODEL)})")
+        while use_subtitle is None:
+            subtitle_choice = input("Add auto subtitle using Faster-Whisper? (y/n): ").strip().lower()
+            if subtitle_choice in ["y", "yes"]:
+                use_subtitle = True
+            elif subtitle_choice in ["n", "no"]:
+                use_subtitle = False
+            else:
+                print("Invalid choice. Please enter y or n.")
+
+        if use_subtitle:
+            print(f"✅ Subtitle enabled (Model: {WHISPER_MODEL}, Bahasa Indonesia)")
+        else:
+            print("❌ Subtitle disabled")
+
+        print()
+
+        cek_dependensi(install_whisper=use_subtitle)
+
+        if not link:
+            link = input("Link YT: ").strip()
+    else:
+        cek_dependensi(install_whisper=use_subtitle)
+
+    video_id = extract_video_id(link)
+
+    if not video_id:
+        print("Invalid YouTube link.")
+        sys.exit(1)
+
+    heatmap_data = ambil_most_replayed(video_id)
+
+    if not heatmap_data:
+        print("No high-engagement segments found.")
+        sys.exit(2)
+
+    print(f"Found {len(heatmap_data)} high-engagement segments.")
+
+    total_duration = get_duration(video_id)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    print(
+        f"Processing clips with {PADDING}s pre-padding "
+        f"and {PADDING}s post-padding."
+    )
+    print(f"Using crop mode: {crop_desc}")
+
+    success_count = 0
+
+    for item in heatmap_data:
+        if success_count >= MAX_CLIPS:
+            break
+
+        if proses_satu_clip(
+            video_id,
+            item,
+            success_count + 1,
+            total_duration,
+            crop_mode,
+            use_subtitle
+        ):
+            success_count += 1
+
+    print(
+        f"Finished processing. "
+        f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
+    )
+
+    if os.path.isdir(OUTPUT_DIR):
+        print("Files in OUTPUT_DIR:", os.listdir(OUTPUT_DIR))
+    else:
+        print("OUTPUT_DIR does not exist.")
+
+    if success_count == 0:
+        sys.exit(3)
 
 
 if __name__ == "__main__":
