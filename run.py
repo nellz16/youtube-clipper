@@ -810,32 +810,32 @@ def main():
 
     success_count = 0
 
-    for item in heatmap_data:
-        if success_count >= MAX_CLIPS:
-            break
+for item in heatmap_data:
+    if success_count >= MAX_CLIPS:
+        break
 
-        if proses_satu_clip(
-            video_id,
-            item,
-            success_count + 1,
-            total_duration,
-            crop_mode,
-            use_subtitle
-        ):
-            success_count += 1
+    if proses_satu_clip(
+        video_id,
+        item,
+        success_count + 1,
+        total_duration,
+        crop_mode,
+        use_subtitle
+    ):
+        success_count += 1
 
-    if os.path.isdir(OUTPUT_DIR):
+print(
+    f"Finished processing. "
+    f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
+)
+
+if os.path.isdir(OUTPUT_DIR):
     print("Files in OUTPUT_DIR:", os.listdir(OUTPUT_DIR))
 else:
     print("OUTPUT_DIR does not exist.")
 
-    print(
-        f"Finished processing. "
-        f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
-    )
-
-    if success_count == 0:
-        sys.exit(3)
+if success_count == 0:
+    sys.exit(3)
 
 
 if __name__ == "__main__":
