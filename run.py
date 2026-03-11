@@ -727,6 +727,11 @@ def main():
         use_subtitle = None
 
     link = args.url
+    print(f"OUTPUT_DIR = {OUTPUT_DIR}")
+    print(f"MAX_CLIPS = {MAX_CLIPS}")
+    print(f"MAX_DURATION = {MAX_DURATION}")
+    print(f"MIN_SCORE = {MIN_SCORE}")
+    print(f"OUTPUT_RATIO = {OUTPUT_RATIO}")
 
     if crop_mode is None or use_subtitle is None or not link:
         print("\n=== Crop Mode ===")
@@ -815,6 +820,11 @@ def main():
             use_subtitle
         ):
             success_count += 1
+
+    if os.path.isdir(OUTPUT_DIR):
+    print("Files in OUTPUT_DIR:", os.listdir(OUTPUT_DIR))
+else:
+    print("OUTPUT_DIR does not exist.")
 
     print(
         f"Finished processing. "
