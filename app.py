@@ -1,4 +1,3 @@
-import base64
 import os
 import re
 import sys
@@ -22,13 +21,16 @@ TELEGRAM_SECRET = os.getenv("TELEGRAM_SECRET", "").strip()
 
 CLIP_CROP = os.getenv("CLIP_CROP", "default")
 CLIP_RATIO = os.getenv("CLIP_RATIO", "9:16")
-CLIP_SUBTITLE = os.getenv("CLIP_SUBTITLE", "n").lower()  # y / n
+CLIP_SUBTITLE = os.getenv("CLIP_SUBTITLE", "n").lower()
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
 
 MAX_TG_FILE_BYTES = int(os.getenv("MAX_TG_FILE_BYTES", str(50 * 1024 * 1024)))
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_ROOT = os.path.join(tempfile.gettempdir(), "ytclip_jobs")
+
+# path cookies dari ClawCloud Config Files
+YOUTUBE_COOKIES_FILE = os.getenv("YOUTUBE_COOKIES_FILE", "/app/config/youtube.cookies.txt")
 
 RUN_LOCK = threading.Lock()
 RECENT_UPDATES = deque(maxlen=300)
@@ -99,20 +101,15 @@ def copy_to_admin(from_chat_id: str, message_id: int):
     )
 
 
-def ensure_youtube_cookies_file():
-    cookies_b64 = os.getenv("YOUTUBE_COOKIES_B64", "").strip()
-    if not cookies_b64:
+def get_cookies_file():
+    path = (YOUTUBE_COOKIES_FILE or "").strip()
+    if not path:
         return None
 
-    cookies_path = "/tmp/youtube.cookies.txt"
+    if os.path.isfile(path):
+        return path
 
-    try:
-        raw = base64.b64decode(cookies_b64)
-        with open(cookies_path, "wb") as f:
-            f.write(raw)
-        return cookies_path
-    except Exception as e:
-        raise RuntimeError(f"Gagal decode YOUTUBE_COOKIES_B64: {e}")
+    return None
 
 
 def upload_clip_to_channel(file_path: str, caption: str):
@@ -202,7 +199,7 @@ def run_clipper_job(url: str, requester_chat_id: str):
         env.setdefault("SUBTITLE_FONT", "Arial")
         env.setdefault("SUBTITLE_LOCATION", "bottom")
 
-        cookies_path = ensure_youtube_cookies_file()
+        cookies_path = get_cookies_file()
         if cookies_path:
             env["YOUTUBE_COOKIES_FILE"] = cookies_path
 
@@ -337,6 +334,7 @@ def health():
             "busy": RUN_LOCK.locked(),
             "admin_set": bool(ADMIN_CHAT_ID),
             "channel_set": bool(CHANNEL_CHAT_ID),
+            "cookies_file": get_cookies_file() or "(none)",
             "time": int(time.time()),
         }
     )
@@ -390,6 +388,7 @@ def telegram_webhook():
             f"Chat ID kamu: {chat_id}\n"
             f"ADMIN_CHAT_ID set: {'yes' if ADMIN_CHAT_ID else 'no'}\n"
             f"CHANNEL_CHAT_ID set: {'yes' if CHANNEL_CHAT_ID else 'no'}\n"
+            f"Cookies file: {get_cookies_file() or '(none)'}\n"
             f"Mode: crop={CLIP_CROP}, ratio={CLIP_RATIO}, subtitle={CLIP_SUBTITLE}"
         )
         send_text(chat_id, summary)
