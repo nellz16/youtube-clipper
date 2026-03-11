@@ -10,26 +10,37 @@ import argparse
 import warnings
 warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = os.getenv("OUTPUT_DIR")
-MAX_DURATION = int(os.getenv("MAX_DURATION"))
-MIN_SCORE = float(os.getenv("MIN_SCORE"))
-MAX_CLIPS = int(os.getenv("MAX_CLIPS"))
-MAX_WORKERS = int(os.getenv("MAX_WORKERS"))
-PADDING = int(os.getenv("PADDING"))
+def require_env(name):
+    value = os.getenv(name)
+    if value is None or value == "":
+        raise RuntimeError(f"Environment variable '{name}' wajib diisi")
+    return value
 
-TOP_HEIGHT = int(os.getenv("TOP_HEIGHT"))
-BOTTOM_HEIGHT = int(os.getenv("BOTTOM_HEIGHT"))
+def env_bool(name, default=False):
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-USE_SUBTITLE = env_bool("USE_SUBTITLE")
-WHISPER_MODEL = os.getenv("WHISPER_MODEL")
-SUBTITLE_FONT = os.getenv("SUBTITLE_FONT")
+OUTPUT_DIR = require_env("OUTPUT_DIR")
+MAX_DURATION = int(require_env("MAX_DURATION"))
+MIN_SCORE = float(require_env("MIN_SCORE"))
+MAX_CLIPS = int(require_env("MAX_CLIPS"))
+MAX_WORKERS = int(require_env("MAX_WORKERS"))
+PADDING = int(require_env("PADDING"))
+
+TOP_HEIGHT = int(require_env("TOP_HEIGHT"))
+BOTTOM_HEIGHT = int(require_env("BOTTOM_HEIGHT"))
+
+USE_SUBTITLE = env_bool("USE_SUBTITLE", False)
+WHISPER_MODEL = require_env("WHISPER_MODEL")
+SUBTITLE_FONT = require_env("SUBTITLE_FONT")
 SUBTITLE_FONTS_DIR = os.getenv("SUBTITLE_FONTS_DIR") or None
-SUBTITLE_LOCATION = os.getenv("SUBTITLE_LOCATION")
+SUBTITLE_LOCATION = require_env("SUBTITLE_LOCATION")
 
-OUTPUT_RATIO = os.getenv("OUTPUT_RATIO")
+OUTPUT_RATIO = require_env("OUTPUT_RATIO")
 OUT_WIDTH = 720
 OUT_HEIGHT = 1280
-
 
 def set_ratio_preset(preset):
     global OUTPUT_RATIO, OUT_WIDTH, OUT_HEIGHT
