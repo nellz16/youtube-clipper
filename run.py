@@ -683,9 +683,6 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
 
 
 def main():
-    """
-    Main entry point of the application.
-    """
     args = parse_args()
     cek_dependensi._args = args
 
@@ -712,7 +709,7 @@ def main():
     coba_masukkan_ffmpeg_ke_path()
     if not ffmpeg_tersedia():
         print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
-        return
+        sys.exit(1)
 
     crop_mode = args.crop
     crop_desc = None
@@ -784,13 +781,13 @@ def main():
 
     if not video_id:
         print("Invalid YouTube link.")
-        return
+        sys.exit(1)
 
     heatmap_data = ambil_most_replayed(video_id)
 
     if not heatmap_data:
         print("No high-engagement segments found.")
-        return
+        sys.exit(2)
 
     print(f"Found {len(heatmap_data)} high-engagement segments.")
 
@@ -823,6 +820,9 @@ def main():
         f"Finished processing. "
         f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
     )
+
+    if success_count == 0:
+        sys.exit(3)
 
 
 if __name__ == "__main__":
