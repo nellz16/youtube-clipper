@@ -111,13 +111,13 @@ def parse_args():
         help="Enable auto subtitle (y/n)",
     )
     parser.add_argument("--whisper-model", dest="whisper_model", help="Faster-Whisper model")
-    parser.add_argument("--subtitle-font", dest="subtitle_font", help="Subtitle font name (e.g., Poppins)")
+    parser.add_argument("--subtitle-font", dest="subtitle_font", help="Subtitle font name")
     parser.add_argument("--subtitle-fontsdir", dest="subtitle_fontsdir", help="Folder containing .ttf/.otf fonts")
     parser.add_argument(
         "--subtitle-location",
         dest="subtitle_location",
         choices=["center", "bottom"],
-        help="Subtitle placement: center or bottom",
+        help="Subtitle placement",
     )
     parser.add_argument("--ratio", choices=["9:16", "1:1", "16:9", "original"], help="Output ratio preset")
     parser.add_argument("--check", action="store_true", help="Check dependencies then exit")
@@ -174,7 +174,7 @@ def extract_video_id(url):
     if parsed.hostname in ("youtu.be", "www.youtu.be"):
         return parsed.path[1:]
 
-    if parsed.hostname in ("youtube.com", "www.youtube.com"):
+    if parsed.hostname in ("youtube.com", "www.youtube.com", "m.youtube.com"):
         if parsed.path == "/watch":
             return parse_qs(parsed.query).get("v", [None])[0]
         if parsed.path.startswith("/shorts/"):
@@ -200,13 +200,12 @@ def get_model_size(model):
 
 def get_yt_dlp_cookie_args():
     cookie_file = os.getenv("YOUTUBE_COOKIES_FILE", "").strip()
-    if cookie_file:
+    if cookie_file and os.path.isfile(cookie_file):
         return ["--cookies", cookie_file]
     return []
 
 
 def cek_dependensi(install_whisper=False, fatal=True):
-    global WHISPER_MODEL
     args = getattr(cek_dependensi, "_args", None)
     skip_update = bool(getattr(args, "no_update_ytdlp", False)) if args else False
 
@@ -221,25 +220,6 @@ def cek_dependensi(install_whisper=False, fatal=True):
         try:
             import faster_whisper  # noqa: F401
             print("✅ Faster-Whisper package installed.")
-
-            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-            model_name = f"faster-whisper-{WHISPER_MODEL}"
-
-            model_cached = False
-            if os.path.exists(cache_dir):
-                try:
-                    cached_items = os.listdir(cache_dir)
-                    model_cached = any(model_name in item.lower() for item in cached_items)
-                except Exception:
-                    pass
-
-            if model_cached:
-                print(f"✅ Model '{WHISPER_MODEL}' already cached and ready.\n")
-            else:
-                print(f"⚠️  Model '{WHISPER_MODEL}' not found in cache.")
-                print(f"   📥 Will auto-download ~{get_model_size(WHISPER_MODEL)} on first transcribe.")
-                print("   ⏱️  Download happens only once, then cached for future use.\n")
-
         except ImportError:
             print("📦 Installing Faster-Whisper package...")
             subprocess.run(
@@ -248,7 +228,6 @@ def cek_dependensi(install_whisper=False, fatal=True):
                 stderr=subprocess.DEVNULL,
             )
             print("✅ Faster-Whisper package installed successfully.")
-            print(f"⚠️  Model '{WHISPER_MODEL}' (~{get_model_size(WHISPER_MODEL)}) will be downloaded on first use.\n")
 
     coba_masukkan_ffmpeg_ke_path()
     if not ffmpeg_tersedia():
@@ -339,50 +318,16 @@ def get_duration(video_id):
     return 3600
 
 
-def generate_subtitle(video_file, subtitle_file, event_hook=None):
+def generate_subtitle(video_file, subtitle_file):
     from faster_whisper import WhisperModel
 
-    def load_and_transcribe():
-        if callable(event_hook):
-            try:
-                event_hook("stage", {"stage": "subtitle_model_load"})
-            except Exception:
-                pass
-
-        print(f"  Loading Faster-Whisper model '{WHISPER_MODEL}'...")
-        print(f"  (If this is first time, downloading ~{get_model_size(WHISPER_MODEL)}...)")
-        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        print("  ✅ Model loaded. Transcribing audio...")
-        if callable(event_hook):
-            try:
-                event_hook("stage", {"stage": "subtitle_transcribe"})
-            except Exception:
-                pass
-
-        segments, info = model.transcribe(video_file, language="id")
-        return segments
-
     try:
-        segments = load_and_transcribe()
+        print(f"  Loading Faster-Whisper model '{WHISPER_MODEL}'...")
+        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
+        segments, _info = model.transcribe(video_file, language="id")
     except Exception as e:
-        msg = str(e)
-        if os.name == "nt" and "WinError 1314" in msg:
-            print(f"  Failed to generate subtitle: {msg}")
-            print("  Retrying once...")
-            try:
-                segments = load_and_transcribe()
-            except Exception as e2:
-                print(f"  Failed to generate subtitle: {str(e2)}")
-                return False
-        else:
-            print(f"  Failed to generate subtitle: {msg}")
-            return False
-
-    if callable(event_hook):
-        try:
-            event_hook("stage", {"stage": "subtitle_write"})
-        except Exception:
-            pass
+        print(f"  Failed to generate subtitle: {e}")
+        return False
 
     print("  Generating subtitle file...")
     with open(subtitle_file, "w", encoding="utf-8") as f:
@@ -406,7 +351,7 @@ def format_timestamp(seconds):
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default", use_subtitle=False, event_hook=None):
+def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default", use_subtitle=False):
     start_original = item["start"]
     end_original = item["start"] + item["duration"]
 
@@ -423,12 +368,6 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
     output_file = os.path.join(OUTPUT_DIR, f"clip_{index}.mp4")
 
     print(f"[Clip {index}] Processing segment ({int(start)}s - {int(end)}s, padding {PADDING}s)")
-
-    if callable(event_hook):
-        try:
-            event_hook("stage", {"stage": "download", "clip_index": index})
-        except Exception:
-            pass
 
     cmd_download = [
         sys.executable,
@@ -519,77 +458,9 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     "-c:a", "aac", "-b:a", "128k",
                     cropped_file,
                 ]
-
-        elif crop_mode == "split_left":
-            if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
-                vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
-                cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
-                    *([] if not vf else ["-vf", vf]),
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "aac", "-b:a", "128k",
-                    cropped_file,
-                ]
-            else:
-                top_h, bottom_h = get_split_heights(out_h)
-                scaled = build_cover_scale_vf(out_w, out_h)
-                vf = (
-                    f"{scaled}[scaled];"
-                    f"[scaled]split=2[s1][s2];"
-                    f"[s1]crop={out_w}:{top_h}:(iw-{out_w})/2:(ih-{out_h})/2[top];"
-                    f"[s2]crop={out_w}:{bottom_h}:0:ih-{bottom_h}[bottom];"
-                    f"[top][bottom]vstack[out]"
-                )
-                cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
-                    "-filter_complex", vf,
-                    "-map", "[out]", "-map", "0:a?",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "aac", "-b:a", "128k",
-                    cropped_file,
-                ]
-
-        elif crop_mode == "split_right":
-            if OUTPUT_RATIO == "original" or not out_w or not out_h or out_h < out_w:
-                vf = build_cover_scale_crop_vf(out_w or 720, out_h or 1280) if OUTPUT_RATIO != "original" else None
-                cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
-                    *([] if not vf else ["-vf", vf]),
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "aac", "-b:a", "128k",
-                    cropped_file,
-                ]
-            else:
-                top_h, bottom_h = get_split_heights(out_h)
-                scaled = build_cover_scale_vf(out_w, out_h)
-                vf = (
-                    f"{scaled}[scaled];"
-                    f"[scaled]split=2[s1][s2];"
-                    f"[s1]crop={out_w}:{top_h}:(iw-{out_w})/2:(ih-{out_h})/2[top];"
-                    f"[s2]crop={out_w}:{bottom_h}:iw-{out_w}:ih-{bottom_h}[bottom];"
-                    f"[top][bottom]vstack[out]"
-                )
-                cmd_crop = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", temp_file,
-                    "-filter_complex", vf,
-                    "-map", "[out]", "-map", "0:a?",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "aac", "-b:a", "128k",
-                    cropped_file,
-                ]
         else:
-            print(f"Unknown crop mode: {crop_mode}")
+            print(f"Crop mode {crop_mode} belum saya sederhanakan di file ini. Pakai default dulu.")
             return False
-
-        if callable(event_hook):
-            try:
-                event_hook("stage", {"stage": "crop", "clip_index": index})
-            except Exception:
-                pass
 
         print("  Cropping video...")
         subprocess.run(
@@ -604,20 +475,8 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
             os.remove(temp_file)
 
         if use_subtitle:
-            if callable(event_hook):
-                try:
-                    event_hook("stage", {"stage": "subtitle", "clip_index": index})
-                except Exception:
-                    pass
-
             print("  Generating subtitle...")
-            if generate_subtitle(cropped_file, subtitle_file, event_hook=event_hook):
-                if callable(event_hook):
-                    try:
-                        event_hook("stage", {"stage": "burn_subtitle", "clip_index": index})
-                    except Exception:
-                        pass
-
+            if generate_subtitle(cropped_file, subtitle_file):
                 print("  Burning subtitle to video...")
                 subtitle_path = escape_subtitles_filter_path(subtitle_file)
                 fonts_dir = SUBTITLE_FONTS_DIR
@@ -649,28 +508,11 @@ def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default",
                     os.remove(subtitle_file)
             else:
                 print("  Subtitle generation failed, continuing without subtitle...")
-                if callable(event_hook):
-                    try:
-                        event_hook("stage", {"stage": "finalize", "clip_index": index})
-                    except Exception:
-                        pass
                 os.rename(cropped_file, output_file)
         else:
-            if callable(event_hook):
-                try:
-                    event_hook("stage", {"stage": "finalize", "clip_index": index})
-                except Exception:
-                    pass
-
             os.rename(cropped_file, output_file)
 
         print("Clip successfully generated.")
-        if callable(event_hook):
-            try:
-                event_hook("stage", {"stage": "done_clip", "clip_index": index})
-            except Exception:
-                pass
-
         return True
 
     except subprocess.CalledProcessError as e:
@@ -725,21 +567,14 @@ def main():
         print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
         sys.exit(1)
 
-    crop_mode = args.crop
-    crop_desc = None
-    if crop_mode:
-        crop_desc = {
-            "default": "Default center crop",
-            "split_left": "Split crop (bottom-left facecam)",
-            "split_right": "Split crop (bottom-right facecam)",
-        }[crop_mode]
+    crop_mode = args.crop or "default"
+    crop_desc = {
+        "default": "Default center crop",
+        "split_left": "Split crop (bottom-left facecam)",
+        "split_right": "Split crop (bottom-right facecam)",
+    }.get(crop_mode, "Default center crop")
 
-    subtitle_choice = args.subtitle
-    if subtitle_choice:
-        use_subtitle = subtitle_choice == "y"
-    else:
-        use_subtitle = None
-
+    use_subtitle = args.subtitle == "y" if args.subtitle else USE_SUBTITLE
     link = args.url
 
     print(f"OUTPUT_DIR = {OUTPUT_DIR}")
@@ -748,54 +583,13 @@ def main():
     print(f"MIN_SCORE = {MIN_SCORE}")
     print(f"OUTPUT_RATIO = {OUTPUT_RATIO}")
     print(f"Using cookie file: {os.getenv('YOUTUBE_COOKIES_FILE', '(none)')}")
+    print(f"Cookie file exists: {os.path.isfile(os.getenv('YOUTUBE_COOKIES_FILE', ''))}")
 
-    if crop_mode is None or use_subtitle is None or not link:
-        print("\n=== Crop Mode ===")
-        print("1. Default (center crop)")
-        print("2. Split 1 (top: center, bottom: bottom-left (facecam))")
-        print("3. Split 2 (top: center, bottom: bottom-right ((facecam))")
+    cek_dependensi(install_whisper=use_subtitle)
 
-        while crop_mode is None:
-            choice = input("\nSelect crop mode (1-3): ").strip()
-            if choice == "1":
-                crop_mode = "default"
-                crop_desc = "Default center crop"
-                break
-            if choice == "2":
-                crop_mode = "split_left"
-                crop_desc = "Split crop (bottom-left facecam)"
-                break
-            if choice == "3":
-                crop_mode = "split_right"
-                crop_desc = "Split crop (bottom-right facecam)"
-                break
-            print("Invalid choice. Please enter 1, 2, or 3.")
-
-        print(f"Selected: {crop_desc}")
-
-        print("\n=== Auto Subtitle ===")
-        print(f"Available model: {WHISPER_MODEL} (~{get_model_size(WHISPER_MODEL)})")
-        while use_subtitle is None:
-            subtitle_choice = input("Add auto subtitle using Faster-Whisper? (y/n): ").strip().lower()
-            if subtitle_choice in ["y", "yes"]:
-                use_subtitle = True
-            elif subtitle_choice in ["n", "no"]:
-                use_subtitle = False
-            else:
-                print("Invalid choice. Please enter y or n.")
-
-        if use_subtitle:
-            print(f"✅ Subtitle enabled (Model: {WHISPER_MODEL}, Bahasa Indonesia)")
-        else:
-            print("❌ Subtitle disabled")
-
-        print()
-        cek_dependensi(install_whisper=use_subtitle)
-
-        if not link:
-            link = input("Link YT: ").strip()
-    else:
-        cek_dependensi(install_whisper=use_subtitle)
+    if not link:
+        print("Invalid YouTube link.")
+        sys.exit(1)
 
     video_id = extract_video_id(link)
 
