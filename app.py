@@ -21,7 +21,7 @@ TELEGRAM_SECRET = os.getenv("TELEGRAM_SECRET", "").strip()
 
 CLIP_CROP = os.getenv("CLIP_CROP", "default")
 CLIP_RATIO = os.getenv("CLIP_RATIO", "9:16")
-CLIP_SUBTITLE = os.getenv("CLIP_SUBTITLE", "n").lower()
+CLIP_SUBTITLE = os.getenv("CLIP_SUBTITLE", "n").lower()  # y / n
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "tiny")
 
 MAX_TG_FILE_BYTES = int(os.getenv("MAX_TG_FILE_BYTES", str(50 * 1024 * 1024)))
@@ -29,16 +29,13 @@ MAX_TG_FILE_BYTES = int(os.getenv("MAX_TG_FILE_BYTES", str(50 * 1024 * 1024)))
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 JOBS_ROOT = os.path.join(tempfile.gettempdir(), "ytclip_jobs")
 
-# path cookies dari ClawCloud Config Files
-YOUTUBE_COOKIES_FILE = os.getenv("YOUTUBE_COOKIES_FILE", "/app/config/youtube.cookies.txt")
-
 RUN_LOCK = threading.Lock()
 RECENT_UPDATES = deque(maxlen=300)
 RECENT_SET = set()
 RECENT_LOCK = threading.Lock()
 
 YT_URL_RE = re.compile(
-    r"(https?://(?:www\.)?(?:youtube\.com/watch\?v=[\w\-]{6,}|youtube\.com/shorts/[\w\-]{6,}|youtu\.be/[\w\-]{6,})(?:[^\s]*)?)",
+    r"(https?://(?:www\.)?(?:youtube\.com/watch\?v=[\w\-]{6,}|m\.youtube\.com/watch\?v=[\w\-]{6,}|youtube\.com/shorts/[\w\-]{6,}|youtu\.be/[\w\-]{6,})(?:[^\s]*)?)",
     re.IGNORECASE,
 )
 
@@ -101,19 +98,6 @@ def copy_to_admin(from_chat_id: str, message_id: int):
     )
 
 
-def prepare_writable_cookies_file(work_dir: str):
-    source_path = (YOUTUBE_COOKIES_FILE or "").strip()
-    if not source_path:
-        return None
-
-    if not os.path.isfile(source_path):
-        return None
-
-    target_path = os.path.join(work_dir, "youtube.cookies.txt")
-    shutil.copyfile(source_path, target_path)
-    return target_path
-
-
 def upload_clip_to_channel(file_path: str, caption: str):
     if not CHANNEL_CHAT_ID:
         raise RuntimeError("CHANNEL_CHAT_ID belum diset")
@@ -134,9 +118,7 @@ def upload_clip_to_channel(file_path: str, caption: str):
                 "chat_id": CHANNEL_CHAT_ID,
                 "caption": caption[:1024],
             },
-            files={
-                field_name: f,
-            },
+            files={field_name: f},
             timeout=1800,
         )
 
@@ -176,15 +158,13 @@ def run_clipper_job(url: str, requester_chat_id: str):
     job_id = uuid.uuid4().hex[:8]
     work_dir = os.path.join(JOBS_ROOT, job_id)
     out_dir = os.path.join(work_dir, "clips")
-
     os.makedirs(out_dir, exist_ok=True)
 
     try:
-        if requester_chat_id:
-            send_text(
-                requester_chat_id,
-                f"Job diterima.\nID: {job_id}\nMode: {CLIP_CROP} | Ratio: {CLIP_RATIO} | Subtitle: {CLIP_SUBTITLE.upper()}",
-            )
+        send_text(
+            requester_chat_id,
+            f"Job diterima.\nID: {job_id}\nMode: {CLIP_CROP} | Ratio: {CLIP_RATIO} | Subtitle: {CLIP_SUBTITLE.upper()}",
+        )
 
         env = os.environ.copy()
         env["OUTPUT_DIR"] = out_dir
@@ -201,10 +181,6 @@ def run_clipper_job(url: str, requester_chat_id: str):
         env.setdefault("SUBTITLE_FONT", "Arial")
         env.setdefault("SUBTITLE_LOCATION", "bottom")
 
-        cookies_path = prepare_writable_cookies_file(work_dir)
-        if cookies_path:
-            env["YOUTUBE_COOKIES_FILE"] = cookies_path
-
         cmd = [
             sys.executable,
             "run.py",
@@ -216,7 +192,6 @@ def run_clipper_job(url: str, requester_chat_id: str):
             "y" if CLIP_SUBTITLE == "y" else "n",
             "--ratio",
             CLIP_RATIO,
-            "--no-update-ytdlp",
         ]
 
         if CLIP_SUBTITLE == "y":
@@ -224,7 +199,6 @@ def run_clipper_job(url: str, requester_chat_id: str):
 
         print(f"[JOB {job_id}] Running command: {' '.join(cmd)}")
         print(f"[JOB {job_id}] OUTPUT_DIR={out_dir}")
-        print(f"[JOB {job_id}] Using cookies file: {env.get('YOUTUBE_COOKIES_FILE', '(none)')}")
 
         proc = subprocess.run(
             cmd,
@@ -263,9 +237,7 @@ def run_clipper_job(url: str, requester_chat_id: str):
         if not clips:
             send_text(
                 requester_chat_id,
-                f"Job selesai tapi tidak ada file MP4 yang ditemukan.\n"
-                f"ID: {job_id}\n\n"
-                f"{debug_output[:3000]}",
+                f"Job selesai tapi tidak ada file MP4 yang ditemukan.\nID: {job_id}\n\n{debug_output[:3000]}",
             )
             return
 
@@ -336,8 +308,6 @@ def health():
             "busy": RUN_LOCK.locked(),
             "admin_set": bool(ADMIN_CHAT_ID),
             "channel_set": bool(CHANNEL_CHAT_ID),
-            "cookies_source_file": YOUTUBE_COOKIES_FILE,
-            "cookies_source_exists": os.path.isfile(YOUTUBE_COOKIES_FILE),
             "time": int(time.time()),
         }
     )
@@ -391,8 +361,6 @@ def telegram_webhook():
             f"Chat ID kamu: {chat_id}\n"
             f"ADMIN_CHAT_ID set: {'yes' if ADMIN_CHAT_ID else 'no'}\n"
             f"CHANNEL_CHAT_ID set: {'yes' if CHANNEL_CHAT_ID else 'no'}\n"
-            f"Cookies source: {YOUTUBE_COOKIES_FILE}\n"
-            f"Cookies source exists: {'yes' if os.path.isfile(YOUTUBE_COOKIES_FILE) else 'no'}\n"
             f"Mode: crop={CLIP_CROP}, ratio={CLIP_RATIO}, subtitle={CLIP_SUBTITLE}"
         )
         send_text(chat_id, summary)
