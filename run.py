@@ -262,7 +262,10 @@ def ambil_most_replayed(video_id):
     print("Reading YouTube heatmap data...")
 
     try:
-        html = requests.get(url, headers=headers, timeout=20).text
+        resp = requests.get(url, headers=headers, timeout=20)
+        print(f"Heatmap request status: {resp.status_code}")
+        html = resp.text
+        print(f"Heatmap HTML length: {len(html)}")
     except Exception:
         return []
 
