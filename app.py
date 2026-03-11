@@ -196,22 +196,32 @@ def run_clipper_job(url: str, requester_chat_id: str):
 
         stdout = (proc.stdout or "").strip()
         stderr = (proc.stderr or "").strip()
-
+        
+        debug_output = "\n".join([
+            "STDOUT:",
+            stdout[-2500:] if stdout else "(empty)",
+            "",
+            "STDERR:",
+            stderr[-1500:] if stderr else "(empty)",
+        ]).strip()
+        
         if proc.returncode != 0:
             err_text = stderr or stdout or "Unknown error"
             send_text(
                 requester_chat_id,
-                f"Gagal membuat clip.\nID: {job_id}\nError:\n{err_text[:3500]}",
+                f"Gagal membuat clip.\nID: {job_id}\nReturn code: {proc.returncode}\n\n{err_text[:3000]}",
             )
             return
-
-        clips = list_mp4_files(out_dir)
-        if not clips:
-            send_text(
-                requester_chat_id,
-                f"Job selesai tapi tidak ada file MP4 yang ditemukan.\nID: {job_id}",
-            )
-            return
+            
+            clips = list_mp4_files(out_dir)
+            if not clips:
+                send_text(
+                    requester_chat_id,
+                    f"Job selesai tapi tidak ada file MP4 yang ditemukan.\n"
+                    f"ID: {job_id}\n\n"
+                    f"{debug_output[:3000]}",
+                )
+                return
 
         uploaded_count = 0
 
