@@ -1,3 +1,4 @@
-requests>=2.31.0
-yt-dlp>=2024.01.01
-Flask>=3.0.0
+requests>=2.32.5
+yt-dlp>=2026.03.03
+Flask>=3.0.3
+gunicorn>=25.1.0
